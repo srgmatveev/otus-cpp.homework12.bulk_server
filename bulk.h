@@ -74,7 +74,7 @@ public:
   void process(std::string &str);
   void append(const std::string &);
   void push();
-
+  void flush();
   static std::shared_ptr<BulkReadCmd> create(std::size_t size)
   {
     return std::make_shared<BulkReadCmd>(size);

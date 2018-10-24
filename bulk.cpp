@@ -22,7 +22,11 @@ void BulkReadCmd::process(std::string &str)
 {
     this->append(str);
 }
-
+void BulkReadCmd::flush()
+{
+    if (!open_braces_count && _current_numb_of_cell)
+        push();
+}
 void BulkReadCmd::push()
 {
     std::size_t tmp_time = std::chrono::duration_cast<std::chrono::microseconds>(

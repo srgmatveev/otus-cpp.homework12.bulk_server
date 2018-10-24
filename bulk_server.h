@@ -24,7 +24,7 @@ private:
   GetFromClient(boost::asio::io_service &io_service, size_t chunk_size,
                 std::shared_ptr<BulkReadCmd> readCmd,
                 std::shared_ptr<ToConsolePrint> consolePrint,
-                std::shared_ptr<ToFilePrint> filePrint) : sock_(io_service), started_(false)
+                std::shared_ptr<ToFilePrint> filePrint) : sock_(io_service), started_(false), countBrackets_{0}
   {
     ptrBulkReadCmds = readCmd;
     ptrToConsolePrint = consolePrint;
@@ -74,10 +74,36 @@ private:
   {
     if (!err)
     {
+
       std::istream in(&buffer);
       std::string tmp_str;
-      std::getline(in, tmp_str);
-      ptrBulkReadBlock->process(tmp_str);
+      while (std::getline(in, tmp_str))
+      {
+        if (tmp_str == "}")
+        {
+          ++countBrackets_;
+          ptrBulkReadBlock->process(tmp_str);
+        }
+        else if (tmp_str == "}")
+        {
+          ptrBulkReadBlock->process(tmp_str);
+          --countBrackets_;
+        }
+        else
+        {
+          if (!countBrackets_)
+          {
+              ptrBulkReadCmds->process(tmp_str);
+        
+          }
+          else
+          {
+             ptrBulkReadBlock->process(tmp_str);
+          }
+        }
+      }
+      ptrBulkReadCmds->flush();
+      ptrBulkReadBlock->flush();
       do_read();
     }
     stop();
@@ -96,6 +122,7 @@ private:
   std::shared_ptr<BulkReadCmd> ptrBulkReadCmds;
   std::shared_ptr<ToConsolePrint> ptrToConsolePrint;
   std::shared_ptr<ToFilePrint> ptrToFilePrint;
+  std::size_t countBrackets_{0};
 };
 
 class BulkServer;
