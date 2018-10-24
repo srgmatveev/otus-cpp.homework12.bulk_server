@@ -59,6 +59,10 @@ public:
   {
     if (!started_)
       return;
+    if (ptrBulkReadCmds)
+      ptrBulkReadCmds->flush();
+    if (ptrBulkReadBlock)
+      ptrBulkReadBlock->flush();
     if (ptrToConsolePrint)
       ptrBulkReadBlock->unsubscribe(ptrToConsolePrint);
     if (ptrToFilePrint)
@@ -75,7 +79,7 @@ private:
     if (!err)
     {
 
-      std::istream in(&buffer);
+      std::istream in(&this->buffer);
       std::string tmp_str;
       while (std::getline(in, tmp_str))
       {
@@ -93,25 +97,64 @@ private:
         {
           if (!countBrackets_)
           {
-              ptrBulkReadCmds->process(tmp_str);
-        
+            ptrBulkReadCmds->process(tmp_str);
           }
           else
           {
-             ptrBulkReadBlock->process(tmp_str);
+            ptrBulkReadBlock->process(tmp_str);
           }
         }
       }
       ptrBulkReadCmds->flush();
       ptrBulkReadBlock->flush();
-      do_read();
+      this->do_read();
     }
+
     stop();
   }
-
+  /*
   void do_read()
   {
-    async_read_until(sock_, buffer, '\n', MEM_FN2(on_read, _1, _2));
+     async_read_until(sock_, buffer, '\n', MEM_FN2(on_read, _1, _2));
+  }
+*/
+  void do_read()
+  {
+    auto self = shared_from_this();
+    boost::asio::async_read_until(sock_, buffer, '\n',
+                                  [self](boost::system::error_code err, std::size_t bytes) {
+                                    if (!err)
+                                    {
+                                      std::istream is(&self->buffer);
+                                      std::string tmp_str;
+                                      std::getline(is, tmp_str);
+                                      if (tmp_str == "}")
+                                      {
+                                        ++self->countBrackets_;
+                                        // self->ptrBulkReadBlock->process(tmp_str);
+                                      }
+                                      else if (tmp_str == "}")
+                                      {
+                                        self->ptrBulkReadBlock->process(tmp_str);
+                                        --self->countBrackets_;
+                                      }
+                                      else
+                                      {
+                                        if (!self->countBrackets_)
+                                        {
+                                          self->ptrBulkReadCmds->process(tmp_str);
+                                        }
+                                        else
+                                        {
+                                          self->ptrBulkReadBlock->process(tmp_str);
+                                        }
+                                      }
+                                      self->do_read();
+                                      return;
+                                    }
+
+                                    self->stop();
+                                  });
   }
 
 private:
@@ -122,7 +165,7 @@ private:
   std::shared_ptr<BulkReadCmd> ptrBulkReadCmds;
   std::shared_ptr<ToConsolePrint> ptrToConsolePrint;
   std::shared_ptr<ToFilePrint> ptrToFilePrint;
-  std::size_t countBrackets_{0};
+  std::size_t countBrackets_;
 };
 
 class BulkServer;
