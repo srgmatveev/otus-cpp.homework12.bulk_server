@@ -71,7 +71,7 @@ public:
                                               _bulkStorage{std::make_shared<BulkStorage>()} {}
 
   void process(std::istream &);
-
+  void process(std::string &str);
   void append(const std::string &);
   void push();
 

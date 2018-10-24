@@ -11,11 +11,16 @@ void BulkReadCmd::process(std::istream &in)
     std::string tmp_str;
     while (std::getline(in, tmp_str))
     {
-       MetricsCount::Instance().stringsIncr(std::this_thread::get_id());
+        MetricsCount::Instance().stringsIncr(std::this_thread::get_id());
         this->append(tmp_str);
     }
     if (!open_braces_count && _current_numb_of_cell)
         push();
+}
+
+void BulkReadCmd::process(std::string &str)
+{
+    this->append(str);
 }
 
 void BulkReadCmd::push()
@@ -76,5 +81,3 @@ void BulkReadCmd::append(const std::string &tmp)
         }
     }
 }
-
-
