@@ -4,6 +4,7 @@
 #include <boost/shared_ptr.hpp>
 #include <boost/enable_shared_from_this.hpp>
 #include <boost/make_shared.hpp>
+#include <boost/asio/signal_set.hpp>
 #include <iostream>
 #include <memory>
 #include "bulk.h"
@@ -12,6 +13,7 @@ using namespace boost::asio;
 #define MEM_FN(x) boost::bind(&self_type::x, shared_from_this())
 #define MEM_FN1(x, y) boost::bind(&self_type::x, shared_from_this(), y)
 #define MEM_FN2(x, y, z) boost::bind(&self_type::x, shared_from_this(), y, z)
+#define MEM_FN3(x, y, w, z) boost::bind(&self_type::x, shared_from_this(), y, w, z)
 class GetFromClient : public boost::enable_shared_from_this<GetFromClient>, boost::noncopyable
 {
   using self_type = GetFromClient;
@@ -50,7 +52,6 @@ public:
   {
     if (started_)
       return;
-    std::cout << "start new client" << std::endl;
     started_ = true;
     do_read();
   }
@@ -121,40 +122,40 @@ private:
   void do_read()
   {
     auto self = shared_from_this();
-    boost::asio::async_read_until(sock_, buffer, '\n',
-                                  [self](boost::system::error_code err, std::size_t bytes) {
-                                    if (!err)
-                                    {
-                                      std::istream is(&self->buffer);
-                                      std::string tmp_str;
-                                      std::getline(is, tmp_str);
-                                      if (tmp_str == "}")
-                                      {
-                                        ++self->countBrackets_;
-                                        // self->ptrBulkReadBlock->process(tmp_str);
-                                      }
-                                      else if (tmp_str == "}")
-                                      {
-                                        self->ptrBulkReadBlock->process(tmp_str);
-                                        --self->countBrackets_;
-                                      }
-                                      else
-                                      {
-                                        if (!self->countBrackets_)
-                                        {
-                                          self->ptrBulkReadCmds->process(tmp_str);
-                                        }
-                                        else
-                                        {
-                                          self->ptrBulkReadBlock->process(tmp_str);
-                                        }
-                                      }
-                                      self->do_read();
-                                      return;
-                                    }
+    async_read_until(sock_, buffer, '\n',
+                     [self](const error_code &error, size_t bytes) {
+                       if (!error)
+                       {
+                         std::istream is(&self->buffer);
+                         std::string tmp_str;
+                         std::getline(is, tmp_str);
+                         if (tmp_str == "}")
+                         {
+                           ++self->countBrackets_;
+                           self->ptrBulkReadBlock->process(tmp_str);
+                         }
+                         else if (tmp_str == "}")
+                         {
+                           self->ptrBulkReadBlock->process(tmp_str);
+                           --self->countBrackets_;
+                         }
+                         else
+                         {
+                           if (!self->countBrackets_)
+                           {
+                             self->ptrBulkReadCmds->process(tmp_str);
+                           }
+                           else
+                           {
+                             self->ptrBulkReadBlock->process(tmp_str);
+                           }
+                         }
+                         self->do_read();
+                         return;
+                       }
 
-                                    self->stop();
-                                  });
+                       self->stop();
+                     });
   }
 
 private:
@@ -173,6 +174,7 @@ using server_ptr = boost::shared_ptr<BulkServer>;
 class BulkServer : public boost::enable_shared_from_this<BulkServer>, boost::noncopyable
 {
   using self_type = BulkServer;
+  using error_code = boost::system::error_code;
 
 public:
   BulkServer(unsigned short port_number, std::size_t chunk_size) : acceptor(service, ip::tcp::endpoint{ip::tcp::v4(), port_number}),
@@ -190,6 +192,10 @@ public:
     GetFromClient::ptr client = GetFromClient::new_(service, chunkSize_,
                                                     ptrBulkReadCmds, ptrToConsolePrint, ptrToFilePrint);
     acceptor.async_accept(client->sock(), MEM_FN2(handle_accept, client, _1));
+
+    boost::asio::signal_set signals(service, SIGINT, SIGTERM);
+    signals.async_wait(MEM_FN3(handler,
+                               boost::ref(signals), _1, _2));
     service.run();
   }
 
@@ -217,6 +223,19 @@ private:
     auto new_client = GetFromClient::new_(service, chunkSize_,
                                           ptrBulkReadCmds, ptrToConsolePrint, ptrToFilePrint);
     acceptor.async_accept(new_client->sock(), MEM_FN2(handle_accept, new_client, _1));
+  }
+  void handler(boost::asio::signal_set &this_, const error_code &error, int signal_number)
+  {
+    std::cout << "\nYou're shure to exit(y/or any key)?";
+    std::string tmp_str = "";
+    std::cin >> tmp_str;
+    if (tmp_str == "y" or tmp_str == "Y")
+    {
+      std::cout << "\nGood bye!" << std::endl;
+      exit(1);
+    }
+    this_.async_wait(MEM_FN3(handler, boost::ref(this_), _1, _2));
+    return;
   }
 
 private:
