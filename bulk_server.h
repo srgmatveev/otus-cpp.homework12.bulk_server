@@ -75,50 +75,6 @@ public:
   ~GetFromClient() { stop(); }
 
 private:
-  void on_read(const error_code &err, size_t bytes)
-  {
-    if (!err)
-    {
-
-      std::istream in(&this->buffer);
-      std::string tmp_str;
-      while (std::getline(in, tmp_str))
-      {
-        if (tmp_str == "}")
-        {
-          ++countBrackets_;
-          ptrBulkReadBlock->process(tmp_str);
-        }
-        else if (tmp_str == "}")
-        {
-          ptrBulkReadBlock->process(tmp_str);
-          --countBrackets_;
-        }
-        else
-        {
-          if (!countBrackets_)
-          {
-            ptrBulkReadCmds->process(tmp_str);
-          }
-          else
-          {
-            ptrBulkReadBlock->process(tmp_str);
-          }
-        }
-      }
-      ptrBulkReadCmds->flush();
-      ptrBulkReadBlock->flush();
-      this->do_read();
-    }
-
-    stop();
-  }
-  /*
-  void do_read()
-  {
-     async_read_until(sock_, buffer, '\n', MEM_FN2(on_read, _1, _2));
-  }
-*/
   void do_read()
   {
     auto self = shared_from_this();
@@ -129,9 +85,9 @@ private:
                          std::istream is(&self->buffer);
                          std::string tmp_str;
                          std::getline(is, tmp_str);
-                         if (tmp_str == "}")
+                         if (tmp_str == "{")
                          {
-                           ++self->countBrackets_;
+                           ++(self->countBrackets_);
                            self->ptrBulkReadBlock->process(tmp_str);
                          }
                          else if (tmp_str == "}")
@@ -177,8 +133,8 @@ class BulkServer : public boost::enable_shared_from_this<BulkServer>, boost::non
   using error_code = boost::system::error_code;
 
 public:
-  BulkServer(unsigned short port_number, std::size_t chunk_size) : acceptor(service, ip::tcp::endpoint{ip::tcp::v4(), port_number}),
-                                                                   isStarted_(false), chunkSize_(chunk_size)
+  BulkServer(unsigned short port_number, std::size_t chunk_size, bool asker = false) : acceptor(service, ip::tcp::endpoint{ip::tcp::v4(), port_number}),
+                                                                                       isStarted_(false), chunkSize_(chunk_size), ask_close(asker)
   {
     ptrBulkReadCmds = BulkReadCmd::create(chunk_size);
     ptrToConsolePrint = ToConsolePrint::create(std::cout, ptrBulkReadCmds);
@@ -193,9 +149,14 @@ public:
                                                     ptrBulkReadCmds, ptrToConsolePrint, ptrToFilePrint);
     acceptor.async_accept(client->sock(), MEM_FN2(handle_accept, client, _1));
 
-    boost::asio::signal_set signals(service, SIGINT, SIGTERM);
-    signals.async_wait(MEM_FN3(handler,
-                               boost::ref(signals), _1, _2));
+    if (ask_close){
+      boost::asio::signal_set signals(service, SIGINT, SIGTERM);
+      signals.async_wait(MEM_FN3(handler,
+                                 boost::ref(signals), _1, _2));
+    service.run();
+    return;
+    }
+
     service.run();
   }
 
@@ -210,9 +171,9 @@ public:
     if (ptrToFilePrint && ptrBulkReadCmds)
       ptrToFilePrint->unsubscribe_on_observable(ptrBulkReadCmds);
   }
-  static server_ptr createServer(unsigned short port_number, std::size_t chunk_size)
+  static server_ptr createServer(unsigned short port_number, std::size_t chunk_size, bool asker = false)
   {
-    return boost::make_shared<BulkServer>(port_number, chunk_size);
+    return boost::make_shared<BulkServer>(port_number, chunk_size, asker);
   }
   ~BulkServer() { stop(); }
 
@@ -246,4 +207,5 @@ private:
   std::shared_ptr<BulkReadCmd> ptrBulkReadCmds;
   std::shared_ptr<ToConsolePrint> ptrToConsolePrint;
   std::shared_ptr<ToFilePrint> ptrToFilePrint;
+  bool ask_close;
 };
