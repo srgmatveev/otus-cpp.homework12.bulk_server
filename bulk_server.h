@@ -125,8 +125,6 @@ private:
   std::size_t countBrackets_;
 };
 
-class BulkServer;
-using server_ptr = boost::shared_ptr<BulkServer>;
 class BulkServer : public boost::enable_shared_from_this<BulkServer>, boost::noncopyable
 {
   using self_type = BulkServer;
@@ -171,7 +169,7 @@ public:
     if (ptrToFilePrint && ptrBulkReadCmds)
       ptrToFilePrint->unsubscribe_on_observable(ptrBulkReadCmds);
   }
-  static server_ptr createServer(unsigned short port_number, std::size_t chunk_size, bool asker = false)
+  static auto createServer(unsigned short port_number, std::size_t chunk_size, bool asker = false)
   {
     return boost::make_shared<BulkServer>(port_number, chunk_size, asker);
   }
