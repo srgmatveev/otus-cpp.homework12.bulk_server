@@ -26,7 +26,8 @@ private:
   GetFromClient(boost::asio::io_service &io_service, size_t chunk_size,
                 std::shared_ptr<BulkReadCmd> readCmd,
                 std::shared_ptr<ToConsolePrint> consolePrint,
-                std::shared_ptr<ToFilePrint> filePrint) : sock_(io_service), started_(false), countBrackets_{0}
+                std::shared_ptr<ToFilePrint> filePrint) : sock_ptr(boost::make_shared<boost::asio::ip::tcp::socket>(io_service)),
+                                                          started_(false), countBrackets_{0}
   {
     ptrBulkReadCmds = readCmd;
     ptrToConsolePrint = consolePrint;
@@ -69,16 +70,16 @@ public:
     if (ptrToFilePrint)
       ptrBulkReadBlock->unsubscribe(ptrToFilePrint);
     started_ = false;
-    sock_.close();
+    sock_ptr->close();
   }
-  ip::tcp::socket &sock() { return sock_; }
+  ip::tcp::socket &sock() { return *sock_ptr; }
   ~GetFromClient() { stop(); }
 
 private:
   void do_read()
   {
     auto self = shared_from_this();
-    async_read_until(sock_, buffer, '\n',
+    async_read_until(*sock_ptr, buffer, '\n',
                      [self](const error_code &error, size_t bytes) {
                        if (!error)
                        {
@@ -115,7 +116,7 @@ private:
   }
 
 private:
-  ip::tcp::socket sock_;
+  boost::shared_ptr<ip::tcp::socket> sock_ptr;
   bool started_;
   streambuf buffer;
   std::shared_ptr<BulkReadCmd> ptrBulkReadBlock;
@@ -131,8 +132,9 @@ class BulkServer : public boost::enable_shared_from_this<BulkServer>, boost::non
   using error_code = boost::system::error_code;
 
 public:
-  BulkServer(unsigned short port_number, std::size_t chunk_size, bool asker = false) : acceptor(service, ip::tcp::endpoint{ip::tcp::v4(), port_number}),
-                                                                                       isStarted_(false), chunkSize_(chunk_size), ask_close(asker)
+  BulkServer(unsigned short port_number, std::size_t chunk_size,
+             boost::asio::io_service &io_service_, bool asker = false) : service(io_service_), acceptor(service, ip::tcp::endpoint{ip::tcp::v4(), port_number}),
+                                                                         isStarted_(false), chunkSize_(chunk_size), ask_close(asker)
   {
     ptrBulkReadCmds = BulkReadCmd::create(chunk_size);
     ptrToConsolePrint = ToConsolePrint::create(std::cout, ptrBulkReadCmds);
@@ -147,14 +149,9 @@ public:
                                                     ptrBulkReadCmds, ptrToConsolePrint, ptrToFilePrint);
     acceptor.async_accept(client->sock(), MEM_FN2(handle_accept, client, _1));
 
-    if (ask_close){
-      boost::asio::signal_set signals(service, SIGINT, SIGTERM);
-      signals.async_wait(MEM_FN3(handler,
-                                 boost::ref(signals), _1, _2));
-    service.run();
-    return;
-    }
-
+    boost::asio::signal_set signals(service, SIGINT);
+    signals.async_wait(MEM_FN3(handler,
+                               boost::ref(signals), _1, _2));
     service.run();
   }
 
@@ -169,9 +166,10 @@ public:
     if (ptrToFilePrint && ptrBulkReadCmds)
       ptrToFilePrint->unsubscribe_on_observable(ptrBulkReadCmds);
   }
-  static auto createServer(unsigned short port_number, std::size_t chunk_size, bool asker = false)
+  static auto createServer(unsigned short port_number, std::size_t chunk_size,
+                           boost::asio::io_service &io_service_, bool asker = false)
   {
-    return boost::make_shared<BulkServer>(port_number, chunk_size, asker);
+    return boost::make_shared<BulkServer>(port_number, chunk_size, io_service_, asker);
   }
   ~BulkServer() { stop(); }
 
@@ -185,20 +183,11 @@ private:
   }
   void handler(boost::asio::signal_set &this_, const error_code &error, int signal_number)
   {
-    std::cout << "\nYou're shure to exit(y/or any key)?";
-    std::string tmp_str = "";
-    std::cin >> tmp_str;
-    if (tmp_str == "y" or tmp_str == "Y")
-    {
-      std::cout << "\nGood bye!" << std::endl;
-      exit(1);
-    }
-    this_.async_wait(MEM_FN3(handler, boost::ref(this_), _1, _2));
-    return;
+    stop();
   }
 
 private:
-  io_service service;
+  io_service &service;
   ip::tcp::acceptor acceptor;
   bool isStarted_;
   size_t chunkSize_;
